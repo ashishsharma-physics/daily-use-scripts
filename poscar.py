@@ -5,6 +5,8 @@
 # * by En Wang, SF10, IOP, CAS (enwang@iphy.ac.cn)
 
 import re
+import click
+import numpy as np
 
 class POSCAR:
 
@@ -18,6 +20,7 @@ class POSCAR:
 		self.a = [eval(i) for i in file.readline().split()]
 		self.b = [eval(i) for i in file.readline().split()]
 		self.c = [eval(i) for i in file.readline().split()]
+		self.lat = [self.a, self.b, self.c]
 		# The number of atom per atomic species
 		tmp = file.readline()
 		# if line is atomic species name, read next line to get number
@@ -25,8 +28,8 @@ class POSCAR:
 			self.atom_num = [eval(i) for i in file.readline().split()]
 			self.atom_species = tmp.split()
 		else:
-			self.num_atom = [eval(i) for i in tmp]
-			self.species_atom = [''] * len(self.num_atom)
+			self.atom_num = [eval(i) for i in tmp]
+			self.atom_species = [''] * len(self.atom_num)
 		# Selective dynamics tag, optional
 		tmp = file.readline()
 		if len(tmp.strip()) == 0:
@@ -53,32 +56,90 @@ class POSCAR:
 			line = file.readline()
 		file.close()
 
-		#process coordinates
-	
-	def output(self, is_number=False, is_atom_name=False):
+	#process coordinates
+	def cart2dir(self):
+		if self.is_cartesian:
+			self.is_cartesian = False
+			lat = np.array(self.lat)
+			new_coordinates = []
+			for c in self.atom_coordinates:
+				c = np.array(c)
+				new_coordinates.append(list(np.linalg.inv(lat) @ c * self.scaling))
+			self.atom_coordinates = new_coordinates
+
+	def dir2cart(self):
+		if not self.is_cartesian:
+			self.is_cartesian = True
+			lat = np.array(self.lat)
+			new_coordinates = []
+			for c in self.atom_coordinates:
+				c = np.array(c)
+				new_coordinates.append(list(lat @ c / self.scaling))
+				# new_coordinates.append([sum(c[i]*l[j]/self.scaling for i, l in enumerate(self.lat)) \
+				# 						for j in range(3)])
+			self.atom_coordinates = new_coordinates
+
+	def print(self, show_number=False, show_atom=True, pos_type='direct'):
 		'''
 		Parameters:
-		is_number: Control whether number each line or not. Default value is False.
-		is_atom_name: Control whether print the atom species or not. Default value is False.
+		show_number: Control whether number each line or not. Default value is False.
+		show_atom:   Control whether print the atom species or not. Default value is True.
+		pos_type:    Choose which coordinates to print.
 		'''
 		import bisect
 		idx_range = [sum(self.atom_num[:i+1])for i in range(len(self.atom_num))]
-		
-		for i, c in enumerate(self.atom_coordinates):
+
+		# Output atom coordinates type
+		if pos_type == 'direct':
+			if not self.is_cartesian:
+				atom_coordinates = self.atom_coordinates
+			else:
+				self.cart2dir()
+				atom_coordinates = self.atom_coordinates
+		elif pos_type == 'cartesian':
+			if self.is_cartesian:
+				atom_coordinates = self.atom_coordinates
+			else:
+				self.dir2cart()
+				atom_coordinates = self.atom_coordinates
+		else:
+			raise ValueError('ERROR POS_TYPE!')
+			
+		for i, c in enumerate(atom_coordinates):
 			# Get c atom species
 			atom_name_id = bisect.bisect_left(idx_range, i+1)
 			atom_name = self.atom_species[atom_name_id]
-			if is_number:
-				if is_atom_name:
-					print(f'{i+1}\t{atom_name}\t{c[0]:.8f}\t{c[1]:.8f}\t{c[2]:.8f}')
+			if show_number:
+				if show_atom:
+					print(f'{i+1:<4}{atom_name:4}{c[0]:14.7f}{c[1]:14.7f}{c[2]:14.7f}')
 				else:
-					print(f'{i+1}\t{atom_name}\t{c[0]:.8f}\t{c[1]:.8f}\t{c[2]:.8f}')
+					print(f'{i+1:<4}{c[0]:14.7f}{c[1]:14.7f}{c[2]:14.7f}')
 			else:
-				if is_atom_name:
-					print(f'{i+1}\t{atom_name}\t{c[0]:.8f}\t{c[1]:.8f}\t{c[2]:.8f}')
+				if show_atom:
+					print(f'{atom_name:4}{c[0]:14.7f}{c[1]:14.7f}{c[2]:14.7f}')
 				else:
-					print(f'{i+1}\t{atom_name}\t{c[0]:.8f}\t{c[1]:.8f}\t{c[2]:.8f}')
+					print(f'{c[0]:14.7f}{c[1]:14.7f}{c[2]:14.7f}')
+
+@click.command()
+@click.option('-f', '--file', default='./POSCAR', help='POSCAR File')
+@click.option('-n', '--number', is_flag=True, help='Show the number of atom')
+@click.option('-a', '--atom', is_flag=True, help='Show the species of atom')
+@click.option('-d', '--direct', 'pos_type', flag_value='direct', help='Choose Direct coordinates to print.', default=True)
+@click.option('-c', '--cartesian', 'pos_type', flag_value='cartesian', help='Choose Cartesian coordinates to print.')
+def output(file, number, atom, pos_type):
+	'''
+	Parameters:
+	number: Control whether number each line or not.
+	atom: Control whether print the atom species or not.
+	pos_type: Choose which coordinates to print.
+	'''
+	s = POSCAR(file)
+	s.print(show_number=number, show_atom=atom, pos_type=pos_type)
 
 if __name__ == "__main__":
-	s = POSCAR('./test/POSCAR')
-	s.output(is_atom_name=True, is_number=False)
+	# Test Code
+	# s = POSCAR('./test/POSCAR')
+	# s.dir2cart()
+	# s.cart2dir()
+
+	output()
